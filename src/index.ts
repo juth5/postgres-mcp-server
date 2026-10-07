@@ -55,7 +55,15 @@ server.registerTool(
     const client = await pool.connect();
     try {
       await client.query("BEGIN TRANSACTION READ ONLY");
-      const result = await client.query(trimmed, params ?? []);
+      // 拡張クエリプロトコルで送り、1回に1文だけ実行させる（"SELECT 1; COMMIT; DELETE ..." のような
+      // 複数文で READ ONLY トランザクションを抜けられないようにする）
+      // queryMode は pg 本体では対応済みだが @types/pg に未定義のため型を補う
+      const config: pg.QueryConfig & { queryMode: "extended" } = {
+        text: trimmed,
+        values: params ?? [],
+        queryMode: "extended",
+      };
+      const result = await client.query(config);
       await client.query("COMMIT");
       return toTextResult({ rowCount: result.rowCount, rows: result.rows });
     } catch (err) {
@@ -67,29 +75,34 @@ server.registerTool(
   }
 );
 
-server.registerTool(
-  "execute",
-  {
-    title: "SQLクエリ実行（書き込み可）",
-    description:
-      "INSERT / UPDATE / DELETE などの書き込みを含む任意のSQL文を実行します。取り消せない変更が発生する可能性があるため注意してください。",
-    inputSchema: {
-      sql: z.string().describe("実行するSQL文"),
-      params: z.array(z.unknown()).optional().describe("プレースホルダ($1, $2, ...)に渡すパラメータ"),
-    },
-  },
-  async ({ sql, params }) => {
-    const client = await pool.connect();
-    try {
-      const result = await client.query(sql, params ?? []);
-      return toTextResult({ rowCount: result.rowCount, rows: result.rows });
-    } catch (err) {
-      return toErrorResult(`クエリ実行エラー: ${(err as Error).message}`);
-    } finally {
-      client.release();
-    }
-  }
-);
+// 参照のみで運用するため、書き込み用の execute ツールは無効化（コメントアウト）しています。
+// const writeEnabled = process.env.ENABLE_WRITE_TOOL === "true";
+//
+// if (writeEnabled) {
+//   server.registerTool(
+//     "execute",
+//     {
+//       title: "SQLクエリ実行（書き込み可）",
+//       description:
+//         "INSERT / UPDATE / DELETE などの書き込みを含む任意のSQL文を実行します。取り消せない変更が発生する可能性があるため注意してください。",
+//       inputSchema: {
+//         sql: z.string().describe("実行するSQL文"),
+//         params: z.array(z.unknown()).optional().describe("プレースホルダ($1, $2, ...)に渡すパラメータ"),
+//       },
+//     },
+//     async ({ sql, params }) => {
+//       const client = await pool.connect();
+//       try {
+//         const result = await client.query(sql, params ?? []);
+//         return toTextResult({ rowCount: result.rowCount, rows: result.rows });
+//       } catch (err) {
+//         return toErrorResult(`クエリ実行エラー: ${(err as Error).message}`);
+//       } finally {
+//         client.release();
+//       }
+//     }
+//   );
+// }
 
 server.registerTool(
   "list_tables",
